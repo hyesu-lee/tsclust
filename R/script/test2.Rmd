@@ -1,0 +1,184 @@
+---
+title: "tsclust"
+author: "hyesu"
+date: '2018 2 22 '
+output: html_document
+---
+
+```{r setup, message = FALSE, warning = FALSE, include = FALSE}
+require(knitr)
+require(devtools)
+require(lubridate)
+require(data.table)
+require(dplyr)
+require(magrittr)
+require(baseEncored)
+require(ggplot2)
+require(purrr)
+load_all("/home/hyesu/encored_R_package/tsclust/")
+```
+
+####**normalizeUsageHourly**
+#####Description
+
+* 시간 단위 전력 사용량을 일 단위로 normalize
+
+#####Arguments
+* usageHourly: 시간 단위 전력 사용량
+    * id: numeric
+    * dateTime: POSIXct
+    * usage: numeric
+
+#####Examples
+```{r, cache = TRUE}
+head(usageHourly)
+normalized <- usageHourly %>% normalizeUsageHourly()
+head(normalized)
+```  
+
+---
+
+####**transformDfForKmeans**
+#####Description
+* 한 row에 한 id의 하루 load profile이 들어가도록 변형
+    * `stats` package에서 제공하는 `kmeans` 함수 사용을 위함
+
+#####Arguments
+* normalizedUsageHourly: normalize 된 시간 단위 전력 사용량
+
+#####Examples
+```{r, cache = TRUE}
+head(normalized)
+loadProfile <- normalized %>% transformDfForKmeans()
+head(loadProfile, 2)
+```  
+
+---
+
+####**clusterLoadProfile**
+#####Description
+* load profile을 클러스터링
+    * 참고: Household Energy Consumption Segmentation Using Hourly Data 논문
+
+#####Arguments
+* loadProfile
+* initialK
+* threshold 
+* numCenters
+
+####Values
+* kmenas object
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+kmeansResult <- clusterLoadProfile(
+  loadProfile = loadProfile %>% select(-id, -date),
+  initialK = 50,
+  threshold = 0.2,
+  numCenters = 10
+)
+```  
+
+---
+
+####**getMeanSquareError**
+#####Description
+* 클러스터별 MSE 값 확인하기
+
+#####Arguments
+* kmeansResult: K-means result
+* loadProfile: load profile
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+getMeanSquareError(kmeansResult = kmeansResult, 
+                   loadProfile = loadProfile %>% select(-id, -date))
+``` 
+
+---
+
+####**getMappingTbl**
+#####Description
+* mapping table 만들기
+
+#####Arguments
+* loadProfile 
+* kmeansResult
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+mappingTbl <- getMappingTbl(loadProfile = loadProfile,
+                                  kmeansResult = kmeansResult)
+
+head(mappingTbl)
+``` 
+
+---
+
+####**attachCluster**
+#####Description
+* 데이터에 cluster 매핑하기
+
+#####Arguments
+* to
+* kmeansResult
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+loadProfileWithCluster <- attachCluster(to = loadProfile,
+                                        kmeansResult = kmeansResult)
+head(loadProfileWithCluster, 2)
+``` 
+
+---
+
+####**calcEntropy**
+#####Description
+* entropy 계산
+
+#####Arguments
+* usageHourly
+* kmeansResult
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+entropy <- calcEntropy(usageHourly = usageHourly,
+                       kmeansResult = kmeansResult)
+head(entropy)
+``` 
+
+---
+
+####**분류하여 클러스터링을 해야할 경우**
+* `classification` 컬럼을 만들어 분류
+
+#####Examples
+```{r, cache = TRUE, warning = FALSE}
+usageHourly %<>%
+  mutate(classification = case_when(
+    weekdays(dateTime) %in% c("Saturday", "Sunday") ~ "weekend",
+    weekdays(dateTime) %nin% c("Saturday", "Sunday") ~ "weekday"
+  ))
+
+head(usageHourly)
+```
+
+```{r, cache = TRUE, warning = FALSE, results = FALSE}
+usageHourly %<>% split(usageHourly$classification)
+
+normalized <- map(usageHourly,
+                  normalizeUsageHourly)
+
+loadProfile <- map(normalized,
+                   transformDfForKmeans)
+
+kmeansResult <- map(loadProfile %>% map(select, c(-id, -date, -classification)),
+                    clusterLoadProfile,
+                    initialK = 50,
+                    threshold = 0.2,
+                    numCenters = 10)
+``` 
+
+
+
+
